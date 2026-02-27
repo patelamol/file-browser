@@ -1,0 +1,7 @@
+{
+  "name": "file-browser",
+  "version": "0.1.0",
+  "description": "File tree browser panel for Claude Code",
+  "entryPoint": "src/cli.ts",
+  "runtime": "bun"
+}
