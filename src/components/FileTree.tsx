@@ -9,6 +9,7 @@ import { createIPCServer, type IPCServer, type ControllerMessage } from "../ipc"
 interface FileTreeProps {
   cwd: string;
   socketPath?: string;
+  paneId?: string;
 }
 
 const STATUS_COLORS: Record<GitStatus, string> = {
@@ -150,7 +151,7 @@ function TreeLine({ entry, selected, hOffset }: { entry: FlatEntry; selected: bo
   );
 }
 
-function FileTreeApp({ cwd: initialCwd, socketPath }: FileTreeProps) {
+function FileTreeApp({ cwd: initialCwd, socketPath, paneId: myPaneIdProp }: FileTreeProps) {
   type ViewMode = "all" | "git";
   const [cwd, setCwd] = useState(initialCwd);
   const [tree, setTree] = useState<TreeNode[]>([]);
@@ -218,10 +219,9 @@ function FileTreeApp({ cwd: initialCwd, socketPath }: FileTreeProps) {
 
   // Poll tmux to detect if this pane is focused
   useEffect(() => {
-    let myPaneId = "";
-    try {
-      myPaneId = require("fs").readFileSync("/tmp/file-browser-pane-id", "utf-8").trim();
-    } catch { return; }
+    // TMUX_PANE env var is the reliable way to get the pane ID we're running in
+    // (tmux display-message -p returns the *active* pane, not ours)
+    const myPaneId = myPaneIdProp || process.env.TMUX_PANE || "";
     if (!myPaneId) return;
 
     const checkFocus = () => {
@@ -346,6 +346,9 @@ function FileTreeApp({ cwd: initialCwd, socketPath }: FileTreeProps) {
         {scrollStart > 0 && (
           <Text dimColor>  ↑ {scrollStart} more</Text>
         )}
+        {flat.length === 0 && viewMode === "git" && (
+          <Text dimColor italic>  No uncommitted changes</Text>
+        )}
         {visibleEntries.map((entry, i) => (
           <TreeLine
             key={entry.node.path}
@@ -377,7 +380,7 @@ function countNodes(nodes: TreeNode[]): number {
   return count;
 }
 
-export async function renderFileTree(cwd: string, socketPath?: string): Promise<void> {
+export async function renderFileTree(cwd: string, socketPath?: string, paneId?: string): Promise<void> {
   process.stdout.write("\x1b[2J\x1b[H\x1b[?25l");
 
   process.on("exit", () => process.stdout.write("\x1b[?25h"));
@@ -387,7 +390,7 @@ export async function renderFileTree(cwd: string, socketPath?: string): Promise<
   });
 
   const { waitUntilExit } = render(
-    <FileTreeApp cwd={cwd} socketPath={socketPath} />,
+    <FileTreeApp cwd={cwd} socketPath={socketPath} paneId={paneId} />,
     { exitOnCtrlC: true }
   );
 

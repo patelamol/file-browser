@@ -16,7 +16,8 @@ async function main() {
     case "show": {
       const cwd = getArg("cwd") || process.cwd();
       const socket = getArg("socket");
-      await renderFileTree(cwd, socket);
+      const paneId = getArg("pane-id");
+      await renderFileTree(cwd, socket, paneId);
       break;
     }
 

@@ -1,28 +1,31 @@
 import { spawn } from "child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 
-const PANE_ID_FILE = "/tmp/file-browser-pane-id";
-
 export function detectTmux(): boolean {
   return !!process.env.TMUX;
 }
 
-function getPaneId(): string | null {
-  if (!existsSync(PANE_ID_FILE)) return null;
+function getPaneIdFile(sourcePaneId: string): string {
+  const safe = sourcePaneId.replace(/[^a-zA-Z0-9]/g, "");
+  return `/tmp/file-browser-pane-${safe}`;
+}
+
+function readPaneId(paneIdFile: string): string | null {
+  if (!existsSync(paneIdFile)) return null;
   try {
-    return readFileSync(PANE_ID_FILE, "utf-8").trim();
+    return readFileSync(paneIdFile, "utf-8").trim();
   } catch {
     return null;
   }
 }
 
-function savePaneId(id: string): void {
-  writeFileSync(PANE_ID_FILE, id);
+function savePaneId(paneIdFile: string, id: string): void {
+  writeFileSync(paneIdFile, id);
 }
 
-function clearPaneId(): void {
+function clearPaneId(paneIdFile: string): void {
   try {
-    if (existsSync(PANE_ID_FILE)) unlinkSync(PANE_ID_FILE);
+    if (existsSync(paneIdFile)) unlinkSync(paneIdFile);
   } catch {}
 }
 
@@ -40,14 +43,17 @@ export async function spawnBrowser(cwd: string): Promise<string | null> {
     return null;
   }
 
-  const existingPaneId = getPaneId();
+  const sourcePaneId = await getCurrentPaneId();
+  const paneIdFile = getPaneIdFile(sourcePaneId);
+
+  const existingPaneId = readPaneId(paneIdFile);
   if (existingPaneId && (await paneExists(existingPaneId))) {
     // Reuse existing pane
     await reusePane(existingPaneId, cwd);
     return existingPaneId;
   }
 
-  return createNewPane(cwd);
+  return createNewPane(cwd, sourcePaneId, paneIdFile);
 }
 
 function reusePane(paneId: string, cwd: string): Promise<void> {
@@ -79,9 +85,8 @@ function selectPane(paneId: string): Promise<void> {
   });
 }
 
-function createNewPane(cwd: string): Promise<string | null> {
+function createNewPane(cwd: string, sourcePaneId: string, paneIdFile: string): Promise<string | null> {
   return new Promise(async (resolve) => {
-    const originalPaneId = await getCurrentPaneId();
     const command = buildShowCommand(cwd);
     const args = ["split-window", "-h", "-p", "25", "-d", "-P", "-F", "#{pane_id}", command];
     const proc = spawn("tmux", args);
@@ -93,9 +98,9 @@ function createNewPane(cwd: string): Promise<string | null> {
 
     proc.on("close", async (code) => {
       if (code === 0 && paneId.trim()) {
-        savePaneId(paneId.trim());
+        savePaneId(paneIdFile, paneId.trim());
         // -d flag keeps focus on original pane, but ensure it
-        await selectPane(originalPaneId);
+        await selectPane(sourcePaneId);
         resolve(paneId.trim());
       } else {
         resolve(null);
@@ -104,14 +109,17 @@ function createNewPane(cwd: string): Promise<string | null> {
   });
 }
 
-function buildShowCommand(cwd: string): string {
+function buildShowCommand(cwd: string, browserPaneId?: string): string {
   const scriptDir = import.meta.dir;
   const cliPath = `${scriptDir}/cli.ts`;
-  return `bun run ${cliPath} show --cwd '${cwd}'`;
+  const paneArg = browserPaneId ? ` --pane-id '${browserPaneId}'` : "";
+  return `bun run ${cliPath} show --cwd '${cwd}'${paneArg}`;
 }
 
 export async function closeBrowser(): Promise<void> {
-  const paneId = getPaneId();
+  const sourcePaneId = await getCurrentPaneId();
+  const paneIdFile = getPaneIdFile(sourcePaneId);
+  const paneId = readPaneId(paneIdFile);
   if (!paneId) return;
 
   if (await paneExists(paneId)) {
@@ -121,15 +129,17 @@ export async function closeBrowser(): Promise<void> {
     });
   }
 
-  clearPaneId();
+  clearPaneId(paneIdFile);
 }
 
 export async function toggleBrowser(cwd: string): Promise<void> {
-  const paneId = getPaneId();
+  const sourcePaneId = await getCurrentPaneId();
+  const paneIdFile = getPaneIdFile(sourcePaneId);
+  const paneId = readPaneId(paneIdFile);
   if (paneId && (await paneExists(paneId))) {
     await closeBrowser();
   } else {
-    clearPaneId();
+    clearPaneId(paneIdFile);
     await spawnBrowser(cwd);
   }
 }
